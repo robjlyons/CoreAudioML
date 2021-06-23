@@ -12,6 +12,7 @@ def audio_converter(audio):
         return audio.astype(np.float32, order='C') / 32768.0
     else:
         print('unimplemented audio data type conversion...')
+        return audio.astype(np.float32)
 
 
 # Splits audio, each split marker determines the fraction of the total audio in that split, i.e [0.75, 0.25] will put
@@ -94,7 +95,11 @@ class DataSet:
             except FileNotFoundError:
                 print(["File Not Found At: " + self.data_dir + filename])
                 return
+            #print("np_data", np_data[1])  # KAB DEBUG ######################################
+            #print("np_data dtype", np_data[1].dtype)  # KAB DEBUG ######################################
             raw_audio = audio_converter(np_data[1])
+            #raw_audio = np_data[1]  # KAB DEBUG ######################################
+            #print("raw_audio", raw_audio)  # KAB DEBUG ######################################
             # Split the audio if the set_names were provided
             if len(set_names) > 1:
                 raw_audio = audio_splitter(raw_audio, splits)
