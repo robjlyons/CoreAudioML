@@ -3,6 +3,7 @@ import torch.nn as nn
 import CoreAudioML.miscfuncs as miscfuncs
 import math
 from contextlib import nullcontext
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 def wrapperkwargs(func, kwargs):
     return func(**kwargs)
@@ -15,39 +16,59 @@ def wrapperargs(func, args):
 
 class SimpleRNN(nn.Module):
     def __init__(self, input_size=1, output_size=1, unit_type="LSTM", hidden_size=32, skip=1, bias_fl=True,
-                 num_layers=1):
+                 num_layers=1, bidirectional=False):
+        """
+        Extend SimpleRNN to support BiLSTM and multiple layers.
+        """
         super(SimpleRNN, self).__init__()
         self.input_size = input_size
         self.output_size = output_size
-        # Create dictionary of possible block types
-        self.rec = wrapperargs(getattr(nn, unit_type), [input_size, hidden_size, num_layers])  #This sets the LSTM layer
-        self.lin = nn.Linear(hidden_size, output_size, bias=bias_fl)
-        self.bias_fl = bias_fl
+        self.hidden_size = hidden_size
+        self.unit_type = unit_type
+        self.num_layers = num_layers
+        self.bidirectional = bidirectional
         self.skip = skip
-        self.save_state = True
+        self.bias_fl = bias_fl
+
+        # Initialize RNN block
+        if unit_type in ["LSTM", "GRU", "RNN"]:
+            self.rec = getattr(nn, unit_type)(input_size=input_size, hidden_size=hidden_size,
+                                              num_layers=num_layers, bias=bias_fl, batch_first=True,
+                                              bidirectional=bidirectional)
+            multiplier = 2 if bidirectional else 1
+            self.lin = nn.Linear(hidden_size * multiplier, output_size, bias=bias_fl)
+
+        elif unit_type == "Transformer":
+            encoder_layer = TransformerEncoderLayer(d_model=hidden_size, nhead=4, batch_first=True)
+            self.rec = TransformerEncoder(encoder_layer, num_layers=num_layers)
+            self.lin = nn.Linear(hidden_size, output_size, bias=bias_fl)
+
+        else:
+            raise ValueError(f"Unsupported unit_type: {unit_type}")
+
         self.hidden = None
+        self.save_state = True
 
     def forward(self, x):
         if self.skip:
-            # save the residual for the skip connection
-            res = x[:, :, 0:self.skip]
-            x, self.hidden = self.rec(x, self.hidden)
+            res = x[:, :, :self.skip]  # Save residual for skip connection
+            x, self.hidden = self.rec(x, self.hidden) if hasattr(self.rec, 'hidden') else (self.rec(x), None)
             return self.lin(x) + res
         else:
-            x, self.hidden = self.rec(x, self.hidden)
+            x, self.hidden = self.rec(x, self.hidden) if hasattr(self.rec, 'hidden') else (self.rec(x), None)
             return self.lin(x)
 
-    # detach hidden state, this resets gradient tracking on the hidden state
-    def detach_hidden(self):
-        if self.hidden.__class__ == tuple:
-            self.hidden = tuple([h.clone().detach() for h in self.hidden])
-        else:
-            self.hidden = self.hidden.clone().detach()
-
-    # changes the hidden state to None, causing pytorch to create an all-zero hidden state when the rec unit is called
     def reset_hidden(self):
+        """Reset hidden states for RNNs."""
         self.hidden = None
 
+    def detach_hidden(self):
+        """Detach hidden states for RNNs to prevent backpropagation through time."""
+        if self.hidden is not None:
+            if isinstance(self.hidden, tuple):
+                self.hidden = tuple([h.clone().detach() for h in self.hidden])
+            else:
+                self.hidden = self.hidden.clone().detach()
     # This functions saves the model and all its paraemters to a json file, so it can be loaded by a JUCE plugin
     def save_model(self, file_name, direc=''):
         if direc:
