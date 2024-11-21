@@ -1,3 +1,5 @@
+%%writefile /content/Automated-GuitarAmpModelling/CoreAudioML/networks.py
+
 import torch
 import torch.nn as nn
 import CoreAudioML.miscfuncs as miscfuncs
@@ -17,9 +19,6 @@ def wrapperargs(func, args):
 class SimpleRNN(nn.Module):
     def __init__(self, input_size=1, output_size=1, unit_type="LSTM", hidden_size=32, skip=1, bias_fl=True,
                  num_layers=1, bidirectional=False):
-        """
-        Extend SimpleRNN to support BiLSTM and multiple layers.
-        """
         super(SimpleRNN, self).__init__()
         self.input_size = input_size
         self.output_size = output_size
@@ -51,11 +50,12 @@ class SimpleRNN(nn.Module):
 
     def forward(self, x):
         if self.skip:
-            res = x[:, :, :self.skip]  # Save residual for skip connection
-            x, self.hidden = self.rec(x, self.hidden) if hasattr(self.rec, 'hidden') else (self.rec(x), None)
+            # Save the residual for the skip connection
+            res = x[:, :, :self.skip]
+            x, self.hidden = self.rec(x) if isinstance(self.rec, (nn.LSTM, nn.GRU, nn.RNN)) else (self.rec(x), None)
             return self.lin(x) + res
         else:
-            x, self.hidden = self.rec(x, self.hidden) if hasattr(self.rec, 'hidden') else (self.rec(x), None)
+            x, self.hidden = self.rec(x) if isinstance(self.rec, (nn.LSTM, nn.GRU, nn.RNN)) else (self.rec(x), None)
             return self.lin(x)
 
     def reset_hidden(self):
@@ -69,6 +69,7 @@ class SimpleRNN(nn.Module):
                 self.hidden = tuple([h.clone().detach() for h in self.hidden])
             else:
                 self.hidden = self.hidden.clone().detach()
+
     # This functions saves the model and all its paraemters to a json file, so it can be loaded by a JUCE plugin
     def save_model(self, file_name, direc=''):
         if direc:
